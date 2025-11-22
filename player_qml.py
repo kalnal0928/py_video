@@ -362,7 +362,7 @@ class PlayerWindow(QtWidgets.QWidget):
         self.resize(1000, 650)
 
         # VLC
-        self.instance = vlc.Instance()
+        self.instance = vlc.Instance("--avcodec-hw=none")
         self.player = self.instance.media_player_new()
 
         # video frame (native widget to host libVLC output)
@@ -371,10 +371,16 @@ class PlayerWindow(QtWidgets.QWidget):
         self.video_frame.setMouseTracking(True)
 
         # controls on bottom (basic)
+        self.open_btn = QtWidgets.QPushButton('Open File(s)')
+        self.open_btn.clicked.connect(self.open_files)
+        self.open_folder_btn = QtWidgets.QPushButton('Open Folder')
+        self.open_folder_btn.clicked.connect(self.open_folder)
         self.play_btn = QtWidgets.QPushButton('Play')
         self.play_btn.clicked.connect(self.toggle_play)
 
         controls = QtWidgets.QHBoxLayout()
+        controls.addWidget(self.open_btn)
+        controls.addWidget(self.open_folder_btn)
         controls.addWidget(self.play_btn)
         controls.addStretch(1)
 
@@ -539,6 +545,29 @@ class PlayerWindow(QtWidgets.QWidget):
         except Exception:
             pass
         return super().eventFilter(obj, event)
+
+    def open_files(self):
+        paths, _ = QtWidgets.QFileDialog.getOpenFileNames(self, 'Open Video Files')
+        if paths:
+            self.backend.addFiles(paths)
+            # play first
+            if not self.player.is_playing():
+                self.backend.playAt(len(self.backend.playlist) - len(paths))
+
+    def open_folder(self):
+        folder = QtWidgets.QFileDialog.getExistingDirectory(self, 'Open Folder')
+        if not folder:
+            return
+        exts = ('.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.webm')
+        files = []
+        for root, _, files_in_dir in os.walk(folder):
+            for fn in sorted(files_in_dir):
+                if fn.lower().endswith(exts):
+                    files.append(os.path.join(root, fn))
+        if files:
+            self.backend.addFiles(files)
+            if not self.player.is_playing():
+                self.backend.playAt(len(self.backend.playlist) - len(files))
 
     def toggle_fullscreen(self):
         # Toggle fullscreen and manage playlist/control visibility

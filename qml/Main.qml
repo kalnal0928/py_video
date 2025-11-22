@@ -1,5 +1,6 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
+import QtQuick.Layouts 1.15
 
 Rectangle {
     id: root
@@ -49,15 +50,18 @@ Rectangle {
     property color surface: "#333333"
     property color accent: "#2196F3"
 
-    Column {
+    ColumnLayout {
         anchors.fill: parent
         anchors.margins: 8
 
-        Row { spacing: 12; anchors.horizontalCenter: parent.horizontalCenter }
+        Row {
+            spacing: 12
+            Layout.alignment: Qt.AlignHCenter
+        }
         Row {
             id: playlistHeader
             spacing: 8
-            anchors.horizontalCenter: parent.horizontalCenter
+            Layout.alignment: Qt.AlignHCenter
             Text { text: "Playlist"; color: "white"; font.bold: true; font.pointSize: 12 }
             Button {
                 text: "Remove All"
@@ -67,12 +71,12 @@ Rectangle {
             }
         }
 
-
-
         // Progress and time (only shown when `showQmlControls` is true)
         Column {
             visible: showQmlControls
             spacing: 6
+            Layout.fillWidth: true
+            
             Row {
                 spacing: 8
                 Text { id: timeText; text: "00:00 / 00:00"; color: "white" }
@@ -80,17 +84,16 @@ Rectangle {
             Slider {
                 id: progressSlider
                 from: 0; to: 100; value: 0
+                Layout.fillWidth: true
                 onPositionChanged: {
-                    // while dragging, reflect preview in real-time
                     if (userDragging) {
                         if (pyBackend) pyBackend.setPositionPercent(value)
-                        // show preview time using backend length
                         var l = backendLengthMs
                         var pos = Math.round((value/100.0) * l)
                         timeText.text = fmtMs(pos) + " / " + fmtMs(l)
                     }
                 }
-                MouseArea { // Added MouseArea
+                MouseArea {
                     anchors.fill: parent
                     onPressed: {
                         userDragging = true
@@ -101,16 +104,13 @@ Rectangle {
                     }
                 }
             }
-            // Thumbnail preview above slider
             Image {
                 id: thumbPreview
                 visible: false
                 width: 160
                 height: 90
                 fillMode: Image.PreserveAspectFit
-                anchors.horizontalCenter: progressSlider.horizontalCenter
-                anchors.bottom: progressSlider.top
-                anchors.bottomMargin: 6
+                Layout.alignment: Qt.AlignHCenter
                 source: ""
                 Rectangle { anchors.fill: parent; color: "transparent" }
             }
@@ -121,7 +121,7 @@ Rectangle {
                     id: volSlider
                     from: 0; to: 100; value: 100
                     onPositionChanged: { /* live update */ }
-                    MouseArea { // Added MouseArea
+                    MouseArea {
                         anchors.fill: parent
                         onReleased: { if (pyBackend) pyBackend.setVolumePercent(volSlider.value) }
                     }
@@ -129,14 +129,12 @@ Rectangle {
             }
         }
 
-                    ListView {
-                    id: listView
-                    model: playlistModel
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    anchors.top: playlistHeader.bottom
-                    anchors.topMargin: 8
-                    clip: true
+        ListView {
+            id: listView
+            model: playlistModel
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            clip: true
             delegate: Rectangle {
                 width: parent.width
                 height: 40
@@ -144,9 +142,12 @@ Rectangle {
                 Row {
                     anchors.fill: parent
                     spacing: 8
-                    Column { width: parent.width - 110; spacing: 2
+                    Column { 
+                        width: parent.width - 110; 
+                        spacing: 2
                         Text { text: name; color: "white"; elide: Text.ElideRight }
-                        Row { spacing: 8
+                        Row { 
+                            spacing: 8
                             Text { text: (duration>0?fmtMs(duration):"--:--"); color: "#cccccc"; font.pixelSize: 11 }
                             Text { text: (size>0?Math.round(size/1024) + " KB":""); color: "#aaaaaa"; font.pixelSize: 11 }
                         }
@@ -156,20 +157,34 @@ Rectangle {
                         height: parent.height
                         color: "transparent"
                         anchors.right: parent.right
-                        Row {
+                        
+                        Button {
+                            id: removeBtn
+                            text: "✕"
                             anchors.right: parent.right
-                            spacing: 4
-                            Button { text: "⬆"; onClicked: { if (pyBackend) pyBackend.moveUp(index) } enabled: index > 0 }
-                            Button { text: "⬇"; onClicked: { if (pyBackend) pyBackend.moveDown(index) } enabled: index < playlistModel.count-1 }
-                            Button { text: "✕"; onClicked: { if (pyBackend) pyBackend.removeAt(index) } }
+                            anchors.verticalCenter: parent.verticalCenter
+                            onClicked: { if (pyBackend) pyBackend.removeAt(index) }
+                        }
+                        Button {
+                            id: downBtn
+                            text: "⬇"
+                            anchors.right: removeBtn.left
+                            anchors.verticalCenter: parent.verticalCenter
+                            onClicked: { if (pyBackend) pyBackend.moveDown(index) }
+                            enabled: index < playlistModel.count-1
+                        }
+                        Button {
+                            id: upBtn
+                            text: "⬆"
+                            anchors.right: downBtn.left
+                            anchors.verticalCenter: parent.verticalCenter
+                            onClicked: { if (pyBackend) pyBackend.moveUp(index) }
+                            enabled: index > 0
                         }
                     }
                 }
                 MouseArea {
-                    anchors.left: parent.left
-                    anchors.top: parent.top
-                    anchors.bottom: parent.bottom
-                    anchors.right: parent.right
+                    anchors.fill: parent
                     anchors.rightMargin: 100
                     acceptedButtons: Qt.LeftButton
                     onDoubleClicked: {
@@ -187,8 +202,8 @@ Rectangle {
         height: 36
         color: "#222"
         radius: 6
-        anchors.top: parent.top // Anchored to root (which is parent here)
-        anchors.horizontalCenter: parent.horizontalCenter // Centered horizontally
+        anchors.top: parent.top
+        anchors.horizontalCenter: parent.horizontalCenter
         anchors.topMargin: 6
         opacity: 0.0
         z: 999
