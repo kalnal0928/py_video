@@ -273,26 +273,6 @@ class Backend(QtCore.QObject):
         except Exception:
             pass
 
-    @Slot(str)
-    def savePlaylist(self, path):
-        try:
-            with open(path, 'w', encoding='utf-8') as f:
-                json.dump(self.playlist, f, ensure_ascii=False, indent=2)
-        except Exception:
-            pass
-
-    @Slot(str)
-    def loadPlaylist(self, path):
-        try:
-            with open(path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            if isinstance(data, list):
-                self.addFiles(data)
-                if len(data) > 0:
-                    self.playAt(0)
-        except Exception:
-            pass
-
     @Slot(int)
     def removeAt(self, index):
         if 0 <= index < len(self.playlist):
