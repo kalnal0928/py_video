@@ -377,6 +377,7 @@ class PlayerWindow(QtWidgets.QWidget):
 
     def __init__(self):
         super().__init__()
+        self.setAcceptDrops(True)
         self.setWindowTitle('Py Video Player (QML Demo)')
         self.resize(1000, 650)
 
@@ -390,27 +391,11 @@ class PlayerWindow(QtWidgets.QWidget):
         self.video_frame.setMouseTracking(True)
 
         # controls on bottom (basic)
-        self.open_btn = QtWidgets.QPushButton('Open File(s)')
-        self.open_btn.clicked.connect(self.open_files)
-        self.open_folder_btn = QtWidgets.QPushButton('Open Folder')
-        self.open_folder_btn.clicked.connect(self.open_folder)
         self.play_btn = QtWidgets.QPushButton('Play')
         self.play_btn.clicked.connect(self.toggle_play)
-        self.save_btn = QtWidgets.QPushButton('Save Playlist')
-        self.save_btn.clicked.connect(self.save_playlist)
-        self.load_btn = QtWidgets.QPushButton('Load Playlist')
-        self.load_btn.clicked.connect(self.load_playlist)
-        self.toggle_playlist_btn = QtWidgets.QPushButton('Hide Playlist')
-        self.toggle_playlist_btn.setCheckable(True)
-        self.toggle_playlist_btn.toggled.connect(self.toggle_playlist)
 
         controls = QtWidgets.QHBoxLayout()
-        controls.addWidget(self.open_btn)
-        controls.addWidget(self.open_folder_btn)
         controls.addWidget(self.play_btn)
-        controls.addWidget(self.save_btn)
-        controls.addWidget(self.load_btn)
-        controls.addWidget(self.toggle_playlist_btn)
         controls.addStretch(1)
 
         left_vbox = QtWidgets.QVBoxLayout()
@@ -575,108 +560,25 @@ class PlayerWindow(QtWidgets.QWidget):
             pass
         return super().eventFilter(obj, event)
 
-    def open_files(self):
-        paths, _ = QtWidgets.QFileDialog.getOpenFileNames(self, 'Open Video Files')
-        if paths:
-            self.backend.addFiles(paths)
-            # play first
-            self.backend.playAt(0)
-
-    def open_folder(self):
-        folder = QtWidgets.QFileDialog.getExistingDirectory(self, 'Open Folder')
-        if not folder:
-            return
-        exts = ('.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.webm')
-        files = []
-        for root, _, files_in_dir in os.walk(folder):
-            for fn in sorted(files_in_dir):
-                if fn.lower().endswith(exts):
-                    files.append(os.path.join(root, fn))
-        if files:
-            self.backend.addFiles(files)
-            self.backend.playAt(0)
-
-    def toggle_playlist(self, checked):
-        # hide/show the QML playlist pane
-        if checked:
-            self.qml_widget.setVisible(False)
-            self.toggle_playlist_btn.setText('Show Playlist')
-        else:
-            self.qml_widget.setVisible(True)
-            self.toggle_playlist_btn.setText('Hide Playlist')
-
     def toggle_fullscreen(self):
         # Toggle fullscreen and manage playlist/control visibility
-        try:
-            if not self.isFullScreen():
-                # entering fullscreen: remember current playlist visibility
-                try:
-                    self._pre_fs_playlist_visible = bool(self.qml_widget.isVisible())
-                except Exception:
-                    self._pre_fs_playlist_visible = True
-                # hide playlist and controls
-                try:
-                    # signal toggle button (this will call toggle_playlist via signal)
-                    if not self.toggle_playlist_btn.isChecked():
-                        self.toggle_playlist_btn.setChecked(True)
-                except Exception:
-                    try:
-                        self.qml_widget.setVisible(False)
-                    except Exception:
-                        pass
-                try:
-                    self.control_bar.setVisible(False)
-                except Exception:
-                    pass
-                # enter fullscreen
-                self.showFullScreen()
-                try:
-                    # Tell libVLC to use fullscreen mode and reset scaling so it fills the window
-                    try:
-                        self.player.set_fullscreen(True)
-                    except Exception:
-                        pass
-                    try:
-                        if hasattr(self.player, 'video_set_scale'):
-                            try:
-                                self.player.video_set_scale(0)
-                            except Exception:
-                                pass
-                    except Exception:
-                        pass
-                except Exception:
-                    pass
-            else:
-                # exiting fullscreen: restore playlist visibility
-                try:
-                    # exit fullscreen in libVLC too
-                    try:
-                        self.player.set_fullscreen(False)
-                    except Exception:
-                        pass
-                    self.showNormal()
-                except Exception:
-                    pass
-                try:
-                    # restore playlist visibility to previous state
-                    if self._pre_fs_playlist_visible:
-                        if self.toggle_playlist_btn.isChecked():
-                            self.toggle_playlist_btn.setChecked(False)
-                        else:
-                            self.qml_widget.setVisible(True)
-                    else:
-                        if not self.toggle_playlist_btn.isChecked():
-                            self.toggle_playlist_btn.setChecked(True)
-                        else:
-                            self.qml_widget.setVisible(False)
-                except Exception:
-                    pass
-                try:
-                    self.control_bar.setVisible(True)
-                except Exception:
-                    pass
-        except Exception:
-            pass
+        if not self.isFullScreen():
+            # entering fullscreen: hide playlist and controls
+            self.qml_widget.setVisible(False)
+            self.control_bar.setVisible(False)
+            
+            # enter fullscreen
+            self.showFullScreen()
+            # Tell libVLC to use fullscreen mode and reset scaling so it fills the window
+            self.player.set_fullscreen(True)
+            if hasattr(self.player, 'video_set_scale'):
+                self.player.video_set_scale(0)
+        else:
+            # exiting fullscreen: show playlist and controls
+            self.player.set_fullscreen(False)
+            self.showNormal()
+            self.qml_widget.setVisible(True)
+            self.control_bar.setVisible(True)
 
     # position slider handlers
     def _pos_pressed(self):
@@ -839,6 +741,28 @@ class PlayerWindow(QtWidgets.QWidget):
                     pass
         except Exception:
             pass
+
+    def dragEnterEvent(self, event: QtGui.QDragEnterEvent):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event: QtGui.QDropEvent):
+        if event.mimeData().hasUrls():
+            urls = event.mimeData().urls()
+            paths = [url.toLocalFile() for url in urls]
+            exts = ('.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.webm')
+            video_files = [p for p in paths if os.path.isfile(p) and p.lower().endswith(exts)]
+            
+            if video_files:
+                self.backend.addFiles(video_files)
+                # Optionally, play the first dropped file if nothing is playing
+                if not self.player.is_playing():
+                    # play the first new file, which is at the end of the current playlist
+                    new_index = len(self.backend.playlist) - len(video_files)
+                    if new_index >= 0:
+                        self.backend.playAt(new_index)
 
 def main():
     app = QtWidgets.QApplication(sys.argv)
