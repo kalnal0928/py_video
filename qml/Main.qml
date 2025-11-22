@@ -156,12 +156,28 @@ Rectangle {
                         height: parent.height
                         color: "transparent"
                         anchors.right: parent.right
-                        Row {
+                        Button {
+                            id: removeBtn
+                            text: "✕"
                             anchors.right: parent.right
-                            spacing: 4
-                            Button { text: "⬆"; onClicked: { if (pyBackend) pyBackend.moveUp(index) } enabled: index > 0 }
-                            Button { text: "⬇"; onClicked: { if (pyBackend) pyBackend.moveDown(index) } enabled: index < playlistModel.count-1 }
-                            Button { text: "✕"; onClicked: { if (pyBackend) pyBackend.removeAt(index) } }
+                            anchors.verticalCenter: parent.verticalCenter
+                            onClicked: { if (pyBackend) pyBackend.removeAt(index) }
+                        }
+                        Button {
+                            id: downBtn
+                            text: "⬇"
+                            anchors.right: removeBtn.left
+                            anchors.verticalCenter: parent.verticalCenter
+                            onClicked: { if (pyBackend) pyBackend.moveDown(index) }
+                            enabled: index < playlistModel.count-1
+                        }
+                        Button {
+                            id: upBtn
+                            text: "⬆"
+                            anchors.right: downBtn.left
+                            anchors.verticalCenter: parent.verticalCenter
+                            onClicked: { if (pyBackend) pyBackend.moveUp(index) }
+                            enabled: index > 0
                         }
                     }
                 }
