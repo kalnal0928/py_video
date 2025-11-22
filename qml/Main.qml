@@ -67,32 +67,7 @@ Rectangle {
             }
         }
 
-        // small toast at top-right
-        Rectangle {
-            id: toast
-            width: parent.width * 0.9
-            height: 36
-            color: "#222"
-            radius: 6
-            anchors.top: parent.top
-            anchors.horizontalCenter: parent.horizontalCenter
-            anchors.topMargin: 6
-            opacity: 0.0
-            z: 999
-            Row {
-                anchors.fill: parent
-                anchors.margins: 8
-                spacing: 8
-                Text { id: toastText; text: ""; color: "white" }
-            }
-            Behavior on opacity { NumberAnimation { duration: 300 } }
-            Timer {
-                id: toastTimer
-                interval: 1800
-                repeat: false
-                onTriggered: toast.opacity = 0.0
-            }
-        }
+
 
         // Progress and time (only shown when `showQmlControls` is true)
         Column {
@@ -105,7 +80,6 @@ Rectangle {
             Slider {
                 id: progressSlider
                 from: 0; to: 100; value: 0
-                // pressed/released handled via Connections (some Qt builds don't expose onPressed/onReleased)
                 onPositionChanged: {
                     // while dragging, reflect preview in real-time
                     if (userDragging) {
@@ -116,15 +90,15 @@ Rectangle {
                         timeText.text = fmtMs(pos) + " / " + fmtMs(l)
                     }
                 }
-            }
-            Connections {
-                target: progressSlider
-                onPressed: {
-                    userDragging = true
-                }
-                onReleased: {
-                    userDragging = false
-                    if (pyBackend) pyBackend.setPositionPercent(progressSlider.value)
+                MouseArea { // Added MouseArea
+                    anchors.fill: parent
+                    onPressed: {
+                        userDragging = true
+                    }
+                    onReleased: {
+                        userDragging = false
+                        if (pyBackend) pyBackend.setPositionPercent(progressSlider.value)
+                    }
                 }
             }
             // Thumbnail preview above slider
@@ -147,24 +121,22 @@ Rectangle {
                     id: volSlider
                     from: 0; to: 100; value: 100
                     onPositionChanged: { /* live update */ }
-                }
-                Connections {
-                    target: volSlider
-                    onReleased: { if (pyBackend) pyBackend.setVolumePercent(volSlider.value) }
+                    MouseArea { // Added MouseArea
+                        anchors.fill: parent
+                        onReleased: { if (pyBackend) pyBackend.setVolumePercent(volSlider.value) }
+                    }
                 }
             }
         }
 
-        ListView {
-            id: listView
-            model: playlistModel
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.top: playlistHeader.bottom
-            anchors.bottom: parent.bottom
-            anchors.topMargin: 8
-            clip: true
-
+                    ListView {
+                    id: listView
+                    model: playlistModel
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.top: playlistHeader.bottom
+                    anchors.topMargin: 8
+                    clip: true
             delegate: Rectangle {
                 width: parent.width
                 height: 40
@@ -205,6 +177,33 @@ Rectangle {
                     }
                 }
             }
+        }
+    }
+
+    // small toast at top-right
+    Rectangle {
+        id: toast
+        width: parent.width * 0.9
+        height: 36
+        color: "#222"
+        radius: 6
+        anchors.top: parent.top // Anchored to root (which is parent here)
+        anchors.horizontalCenter: parent.horizontalCenter // Centered horizontally
+        anchors.topMargin: 6
+        opacity: 0.0
+        z: 999
+        Row {
+            anchors.fill: parent
+            anchors.margins: 8
+            spacing: 8
+            Text { id: toastText; text: ""; color: "white" }
+        }
+        Behavior on opacity { NumberAnimation { duration: 300 } }
+        Timer {
+            id: toastTimer
+            interval: 1800
+            repeat: false
+            onTriggered: toast.opacity = 0.0
         }
     }
 
