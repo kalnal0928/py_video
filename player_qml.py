@@ -156,19 +156,21 @@ class Backend(QtCore.QObject):
 
     @Slot()
     def on_media_end(self):
-        # play next item if exists (called on main thread)
+        # play next item if exists (called on main thread), with looping
         try:
-            if 0 <= self.current_index < len(self.playlist) - 1:
-                self.current_index += 1
-                next_path = self.playlist[self.current_index]
-                self.open_path(next_path)
-                # show toast in QML
-                try:
-                    root = self.quick_widget.rootObject()
-                    if root:
-                        root.showToast('Playing: ' + os.path.basename(next_path))
-                except Exception:
-                    pass
+            if not self.playlist:
+                return
+
+            self.current_index = (self.current_index + 1) % len(self.playlist)
+            next_path = self.playlist[self.current_index]
+            self.open_path(next_path)
+            # show toast in QML
+            try:
+                root = self.quick_widget.rootObject()
+                if root:
+                    root.showToast('Playing: ' + os.path.basename(next_path))
+            except Exception:
+                pass
         except Exception:
             pass
         
@@ -324,9 +326,22 @@ class Backend(QtCore.QObject):
             except Exception:
                 pass
 
+    @Slot()
+    def clearPlaylist(self):
+        self.player.stop()
+        self.playlist.clear()
+        self.current_index = -1
+        root = self.quick_widget.rootObject()
+        if root:
+            try:
+                root.clearPlaylist()
+            except Exception as e:
+                print(f"Error calling QML clearPlaylist: {e}")
+
     def open_path(self, path):
         if not os.path.exists(path):
             return
+        self.player.stop()
         media = self.instance.media_new(path)
         self.player.set_media(media)
         # set video output window (Windows / Linux / macOS handled by instance)
@@ -448,6 +463,12 @@ class PlayerWindow(QtWidgets.QWidget):
         self.qml_widget.setResizeMode(QQuickWidget.SizeRootObjectToView)
         self.qml_widget.setMouseTracking(True)
 
+        # if QML isn't ready immediately, listen for status changes to flush playlist
+        try:
+            self.qml_widget.statusChanged.connect(self._on_qml_status_changed)
+        except Exception:
+            pass
+
         # layout
         hbox = QtWidgets.QHBoxLayout()
         hbox.addLayout(left_vbox, 4)
@@ -457,6 +478,24 @@ class PlayerWindow(QtWidgets.QWidget):
         # backend bridge
         self.backend = Backend(self.instance, self.player, self.qml_widget, self.video_frame)
         self.qml_widget.engine().rootContext().setContextProperty('pyBackend', self.backend)
+
+    def _on_qml_status_changed(self, status):
+        try:
+            # QQuickWidget.Ready enum indicates QML root is available
+            if status == QQuickWidget.Ready:
+                root = self.qml_widget.rootObject()
+                if root and hasattr(self, 'backend'):
+                    # flush existing playlist entries into QML
+                    try:
+                        for idx, p in enumerate(self.backend.playlist):
+                            try:
+                                root.addItem(os.path.basename(p), p, 0, 0)
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+        except Exception:
+            pass
 
         # timer for status
         self.timer = QtCore.QTimer(self)
@@ -591,9 +630,30 @@ class PlayerWindow(QtWidgets.QWidget):
                     pass
                 # enter fullscreen
                 self.showFullScreen()
+                try:
+                    # Tell libVLC to use fullscreen mode and reset scaling so it fills the window
+                    try:
+                        self.player.set_fullscreen(True)
+                    except Exception:
+                        pass
+                    try:
+                        if hasattr(self.player, 'video_set_scale'):
+                            try:
+                                self.player.video_set_scale(0)
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
             else:
                 # exiting fullscreen: restore playlist visibility
                 try:
+                    # exit fullscreen in libVLC too
+                    try:
+                        self.player.set_fullscreen(False)
+                    except Exception:
+                        pass
                     self.showNormal()
                 except Exception:
                     pass

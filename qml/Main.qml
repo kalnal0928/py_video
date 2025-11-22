@@ -3,9 +3,8 @@ import QtQuick.Controls 2.15
 
 Rectangle {
     id: root
-    width: 320
+    anchors.fill: parent
     color: bgColor
-    height: 600
 
     ListModel {
         id: playlistModel
@@ -37,9 +36,15 @@ Rectangle {
         }
     }
 
+    function clearPlaylist() {
+        playlistModel.clear()
+    }
+
     property int backendPosMs: 0
     property int backendLengthMs: 0
     property bool userDragging: false
+    // When False, hide the QML playback/volume controls (we use native QtWidgets controls)
+    property bool showQmlControls: false
     property color bgColor: "#2b2b2b"
     property color surface: "#333333"
     property color accent: "#2196F3"
@@ -50,21 +55,16 @@ Rectangle {
 
         Row { spacing: 12; anchors.horizontalCenter: parent.horizontalCenter }
         Row {
+            id: playlistHeader
             spacing: 8
             anchors.horizontalCenter: parent.horizontalCenter
             Text { text: "Playlist"; color: "white"; font.bold: true; font.pointSize: 12 }
-            Switch {
-                id: themeSwitch
-                checked: true
-                onCheckedChanged: {
-                    if (checked) {
-                        bgColor = "#2b2b2b"; surface = "#333333"; accent = "#2196F3"
-                    } else {
-                        bgColor = "#ffffff"; surface = "#f2f2f2"; accent = "#1976D2"
-                    }
+            Button {
+                text: "Remove All"
+                onClicked: {
+                    if (pyBackend) pyBackend.clearPlaylist()
                 }
             }
-            Text { text: themeSwitch.checked ? "Dark" : "Light"; color: "white" }
         }
 
         // small toast at top-right
@@ -94,8 +94,9 @@ Rectangle {
             }
         }
 
-        // Progress and time
+        // Progress and time (only shown when `showQmlControls` is true)
         Column {
+            visible: showQmlControls
             spacing: 6
             Row {
                 spacing: 8
@@ -104,8 +105,7 @@ Rectangle {
             Slider {
                 id: progressSlider
                 from: 0; to: 100; value: 0
-                onPressed: { userDragging = true }
-                onReleased: { userDragging = false; if (pyBackend) pyBackend.setPositionPercent(value) }
+                // pressed/released handled via Connections (some Qt builds don't expose onPressed/onReleased)
                 onPositionChanged: {
                     // while dragging, reflect preview in real-time
                     if (userDragging) {
@@ -117,12 +117,23 @@ Rectangle {
                     }
                 }
             }
+            Connections {
+                target: progressSlider
+                onPressed: {
+                    userDragging = true
+                }
+                onReleased: {
+                    userDragging = false
+                    if (pyBackend) pyBackend.setPositionPercent(progressSlider.value)
+                }
+            }
             // Thumbnail preview above slider
             Image {
                 id: thumbPreview
                 visible: false
-                onPressed: { userDragging = true }
-                onPositionChanged: {
+                width: 160
+                height: 90
+                fillMode: Image.PreserveAspectFit
                 anchors.horizontalCenter: progressSlider.horizontalCenter
                 anchors.bottom: progressSlider.top
                 anchors.bottomMargin: 6
@@ -132,19 +143,14 @@ Rectangle {
             Row {
                 spacing: 8
                 Text { text: "Vol"; color: "white" }
-            }
-            Connections {
-                target: progressSlider
-                onReleased: {
-                    userDragging = false
-                    if (pyBackend) pyBackend.setPositionPercent(progressSlider.value)
-                }
                 Slider {
                     id: volSlider
                     from: 0; to: 100; value: 100
-                    onPressed: { }
                     onPositionChanged: { /* live update */ }
-                    onReleased: { if (pyBackend) pyBackend.setVolumePercent(value) }
+                }
+                Connections {
+                    target: volSlider
+                    onReleased: { if (pyBackend) pyBackend.setVolumePercent(volSlider.value) }
                 }
             }
         }
@@ -154,9 +160,9 @@ Rectangle {
             model: playlistModel
             anchors.left: parent.left
             anchors.right: parent.right
-            anchors.top: parent.top
+            anchors.top: playlistHeader.bottom
             anchors.bottom: parent.bottom
-            anchors.margins: 8
+            anchors.topMargin: 8
             clip: true
 
             delegate: Rectangle {
@@ -188,7 +194,11 @@ Rectangle {
                     }
                 }
                 MouseArea {
-                    anchors.fill: parent
+                    anchors.left: parent.left
+                    anchors.top: parent.top
+                    anchors.bottom: parent.bottom
+                    anchors.right: parent.right
+                    anchors.rightMargin: 100
                     acceptedButtons: Qt.LeftButton
                     onDoubleClicked: {
                         if (pyBackend) pyBackend.playAt(index)
