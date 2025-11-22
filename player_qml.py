@@ -624,16 +624,6 @@ class PlayerWindow(QtWidgets.QWidget):
 
     # (eventFilter implemented earlier to handle mouse and keyboard)
 
-    def save_playlist(self):
-        path, _ = QtWidgets.QFileDialog.getSaveFileName(self, 'Save Playlist', os.path.join(os.path.expanduser('~'), 'playlist.json'), 'JSON Files (*.json)')
-        if path:
-            self.backend.savePlaylist(path)
-
-    def load_playlist(self):
-        path, _ = QtWidgets.QFileDialog.getOpenFileName(self, 'Load Playlist', os.path.expanduser('~'), 'JSON Files (*.json);;All Files (*)')
-        if path:
-            self.backend.loadPlaylist(path)
-
     def toggle_play(self):
         if self.player.is_playing():
             self.player.pause()
