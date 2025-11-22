@@ -362,7 +362,7 @@ class PlayerWindow(QtWidgets.QWidget):
         self.resize(1000, 650)
 
         # VLC
-        self.instance = vlc.Instance("--avcodec-hw=none")
+        self.instance = vlc.Instance()
         self.player = self.instance.media_player_new()
 
         # video frame (native widget to host libVLC output)
