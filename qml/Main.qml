@@ -41,6 +41,12 @@ Rectangle {
         playlistModel.clear()
     }
 
+    function setCurrentIndex(index) {
+        if (listView) {
+            listView.currentIndex = index;
+        }
+    }
+
     property int backendPosMs: 0
     property int backendLengthMs: 0
     property bool userDragging: false
@@ -138,9 +144,11 @@ Rectangle {
             delegate: Rectangle {
                 width: parent.width
                 height: 40
-                color: index % 2 === 0 ? "#333" : "#3a3a3a"
+                color: listView.currentIndex === index ? accent : (index % 2 === 0 ? surface : "#3a3a3a")
+
                 Row {
-                    anchors.fill: parent
+                    width: parent.width
+                    height: parent.height
                     spacing: 8
                     Column { 
                         width: parent.width - 110; 
@@ -152,11 +160,9 @@ Rectangle {
                             Text { text: (size>0?Math.round(size/1024) + " KB":""); color: "#aaaaaa"; font.pixelSize: 11 }
                         }
                     }
-                    Rectangle {
+                    Item {
                         width: 100
                         height: parent.height
-                        color: "transparent"
-                        anchors.right: parent.right
                         
                         Button {
                             id: removeBtn

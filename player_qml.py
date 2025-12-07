@@ -37,12 +37,13 @@ except Exception as e:
     raise RuntimeError("python-vlc import failed: %s" % e)
 
 class Backend(QtCore.QObject):
-    def __init__(self, instance, player, quick_widget, video_frame):
+    def __init__(self, instance, player, quick_widget, video_frame, player_window=None):
         super().__init__()
         self.instance = instance
         self.player = player
         self.quick_widget = quick_widget
         self.video_frame = video_frame
+        self.player_window = player_window  # Reference to PlayerWindow for update_status
         self.playlist = []
         self.current_index = -1
         # attach VLC end-of-media event to trigger next playback
@@ -323,6 +324,11 @@ class Backend(QtCore.QObject):
             return
         self.player.stop()
         media = self.instance.media_new(path)
+        # Parse media to get duration information
+        try:
+            media.parse()
+        except Exception:
+            pass
         self.player.set_media(media)
         # set video output window (Windows / Linux / macOS handled by instance)
         try:
@@ -335,6 +341,11 @@ class Backend(QtCore.QObject):
         except Exception:
             pass
         self.player.play()
+        # Force status updates after delays to get time info as media loads
+        if self.player_window:
+            QtCore.QTimer.singleShot(500, self.player_window.update_status)
+            QtCore.QTimer.singleShot(1000, self.player_window.update_status)
+            QtCore.QTimer.singleShot(2000, self.player_window.update_status)
         # update current_index if path is in playlist
         try:
             if path in self.playlist:
@@ -348,6 +359,7 @@ class Backend(QtCore.QObject):
             root = self.quick_widget.rootObject()
             if root:
                 root.showToast('Playing: ' + os.path.basename(path))
+                root.setCurrentIndex(self.current_index)
         except Exception:
             pass
 
@@ -360,6 +372,9 @@ class PlayerWindow(QtWidgets.QWidget):
         self.setAcceptDrops(True)
         self.setWindowTitle('Py Video Player (QML Demo)')
         self.resize(1000, 650)
+        # Ensure window can receive keyboard events
+        self.setFocusPolicy(QtCore.Qt.StrongFocus)
+        self.setFocus()
 
         # VLC
         self.instance = vlc.Instance("--avcodec-hw=none")
@@ -369,6 +384,8 @@ class PlayerWindow(QtWidgets.QWidget):
         self.video_frame = QtWidgets.QFrame()
         self.video_frame.setStyleSheet('background-color: black;')
         self.video_frame.setMouseTracking(True)
+        # Allow keyboard events to pass through to parent
+        self.video_frame.setFocusPolicy(QtCore.Qt.NoFocus)
 
         # controls on bottom (basic)
         self.open_btn = QtWidgets.QPushButton('Open File(s)')
@@ -377,6 +394,10 @@ class PlayerWindow(QtWidgets.QWidget):
         self.open_folder_btn.clicked.connect(self.open_folder)
         self.play_btn = QtWidgets.QPushButton('Play')
         self.play_btn.clicked.connect(self.toggle_play)
+        # Set focus policy so buttons don't steal keyboard focus for arrow keys
+        self.open_btn.setFocusPolicy(QtCore.Qt.TabFocus)
+        self.open_folder_btn.setFocusPolicy(QtCore.Qt.TabFocus)
+        self.play_btn.setFocusPolicy(QtCore.Qt.TabFocus)
 
         controls = QtWidgets.QHBoxLayout()
         controls.addWidget(self.open_btn)
@@ -399,9 +420,14 @@ class PlayerWindow(QtWidgets.QWidget):
         self.pos_slider.sliderPressed.connect(self._pos_pressed)
         self.pos_slider.sliderReleased.connect(self._pos_released)
         self.pos_slider.sliderMoved.connect(self._pos_moved)
+        # Allow slider to receive focus for mouse interaction, but let arrow keys pass through
+        self.pos_slider.setFocusPolicy(QtCore.Qt.ClickFocus)
 
         self.time_label = QtWidgets.QLabel('00:00 / 00:00')
         self.time_label.setFixedWidth(140)
+        # Ensure label is visible and updates properly
+        self.time_label.setStyleSheet('color: black; background-color: white; padding: 2px;')
+        self.time_label.setAlignment(QtCore.Qt.AlignCenter)
 
         self.vol_label = QtWidgets.QLabel('Vol: 100')
         self.vol_label.setFixedWidth(60)
@@ -410,6 +436,8 @@ class PlayerWindow(QtWidgets.QWidget):
         self.vol_slider.setValue(100)
         self.vol_slider.setFixedWidth(120)
         self.vol_slider.valueChanged.connect(self._vol_changed)
+        # Allow slider to receive focus for mouse interaction, but let arrow keys pass through
+        self.vol_slider.setFocusPolicy(QtCore.Qt.ClickFocus)
 
         cb_layout.addWidget(self.pos_slider, 1)
         cb_layout.addWidget(self.time_label)
@@ -433,6 +461,8 @@ class PlayerWindow(QtWidgets.QWidget):
         self.qml_widget.setSource(QUrl.fromLocalFile(qml_path))
         self.qml_widget.setResizeMode(QQuickWidget.SizeRootObjectToView)
         self.qml_widget.setMouseTracking(True)
+        # Allow keyboard events to pass through to parent
+        self.qml_widget.setFocusPolicy(QtCore.Qt.NoFocus)
 
         # if QML isn't ready immediately, listen for status changes to flush playlist
         try:
@@ -447,7 +477,7 @@ class PlayerWindow(QtWidgets.QWidget):
         self.setLayout(hbox)
 
         # backend bridge
-        self.backend = Backend(self.instance, self.player, self.qml_widget, self.video_frame)
+        self.backend = Backend(self.instance, self.player, self.qml_widget, self.video_frame, self)
         self.qml_widget.engine().rootContext().setContextProperty('pyBackend', self.backend)
 
     def _on_qml_status_changed(self, status):
@@ -486,27 +516,39 @@ class PlayerWindow(QtWidgets.QWidget):
 
     def _seek_relative(self, ms):
         try:
+            # Check if player has media loaded
+            if not self.player.get_media():
+                return
             t = self.player.get_time()
             if t is None or t < 0:
                 t = 0
-            self.player.set_time(max(0, int(t + ms)))
-        except Exception:
-            pass
+            length = self.player.get_length()
+            if length is None or length < 0:
+                length = 0
+            new_time = max(0, int(t + ms))
+            if length > 0:
+                new_time = min(new_time, length - 100)
+            self.player.set_time(new_time)
+        except Exception as e:
+            print(f"Seek error: {e}")
 
     def _change_volume(self, delta):
         try:
             v = self.player.audio_get_volume()
-            if v is None:
+            if v is None or v < 0:
                 v = 100
             v = max(0, min(100, int(v + delta)))
             self.player.audio_set_volume(v)
+            # Update UI immediately
             try:
-                self.vol_slider.setValue(v)
-                self.vol_label.setText(f'Vol: {v}')
+                if hasattr(self, 'vol_slider'):
+                    self.vol_slider.setValue(v)
+                if hasattr(self, 'vol_label'):
+                    self.vol_label.setText(f'Vol: {v}')
             except Exception:
                 pass
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"Volume change error in eventFilter: {e}")
 
     def eventFilter(self, obj, event):
         # show controls on mouse move
@@ -517,31 +559,44 @@ class PlayerWindow(QtWidgets.QWidget):
                     self.hide_timer.start()
                 except Exception:
                     pass
-            # keyboard shortcuts
+            # When video frame is clicked, give focus to main window for keyboard input
+            if event.type() == QtCore.QEvent.MouseButtonPress:
+                if obj == self.video_frame:
+                    self.setFocus()
+                    return False  # Let the event continue
+            # keyboard shortcuts - handle globally for this window and its children
             if event.type() == QtCore.QEvent.KeyPress:
-                key = event.key()
-                if key == QtCore.Qt.Key_Space:
-                    self.toggle_play()
-                    return True
-                if key in (QtCore.Qt.Key_Enter, QtCore.Qt.Key_Return):
-                    # toggle fullscreen via centralized handler
-                    try:
-                        self.toggle_fullscreen()
-                    except Exception:
-                        pass
-                    return True
-                if key == QtCore.Qt.Key_Left:
-                    self._seek_relative(-self.SEEK_MS)
-                    return True
-                if key == QtCore.Qt.Key_Right:
-                    self._seek_relative(self.SEEK_MS)
-                    return True
-                if key == QtCore.Qt.Key_Up:
-                    self._change_volume(self.VOL_STEP)
-                    return True
-                if key == QtCore.Qt.Key_Down:
-                    self._change_volume(-self.VOL_STEP)
-                    return True
+                # Process keyboard events for this window and its child widgets
+                if obj == self or obj == self.video_frame or obj == self.qml_widget or obj == self.control_bar or hasattr(obj, 'parent') and obj.parent() == self:
+                    key = event.key()
+                    if key == QtCore.Qt.Key_Space:
+                        self.toggle_play()
+                        event.accept()
+                        return True
+                    if key in (QtCore.Qt.Key_Enter, QtCore.Qt.Key_Return):
+                        # toggle fullscreen via centralized handler
+                        try:
+                            self.toggle_fullscreen()
+                        except Exception:
+                            pass
+                        event.accept()
+                        return True
+                    if key == QtCore.Qt.Key_Left:
+                        self._seek_relative(-self.SEEK_MS)
+                        event.accept()
+                        return True
+                    if key == QtCore.Qt.Key_Right:
+                        self._seek_relative(self.SEEK_MS)
+                        event.accept()
+                        return True
+                    if key == QtCore.Qt.Key_Up:
+                        self._change_volume(self.VOL_STEP)
+                        event.accept()
+                        return True
+                    if key == QtCore.Qt.Key_Down:
+                        self._change_volume(-self.VOL_STEP)
+                        event.accept()
+                        return True
         except Exception:
             pass
         return super().eventFilter(obj, event)
@@ -623,6 +678,9 @@ class PlayerWindow(QtWidgets.QWidget):
             pass
 
     def _fmt_ms(self, ms):
+        # Handle None, negative, or invalid values
+        if ms is None or ms < 0:
+            ms = 0
         s = int(ms/1000)
         h = s // 3600
         m = (s % 3600) // 60
@@ -648,98 +706,210 @@ class PlayerWindow(QtWidgets.QWidget):
                 self.toggle_fullscreen()
             except Exception:
                 pass
+            event.accept()
             return
         if key == QtCore.Qt.Key_Space:
             self.toggle_play()
+            event.accept()
             return
         if key == QtCore.Qt.Key_Left:
             self.seek(-self.SEEK_MS)
+            event.accept()
             return
         if key == QtCore.Qt.Key_Right:
             self.seek(self.SEEK_MS)
+            event.accept()
             return
         if key == QtCore.Qt.Key_Up:
             self.change_volume(self.VOL_STEP)
+            event.accept()
             return
         if key == QtCore.Qt.Key_Down:
             self.change_volume(-self.VOL_STEP)
+            event.accept()
             return
         super().keyPressEvent(event)
 
     def seek(self, ms):
         try:
-            cur = self.player.get_time()
-            if cur == -1:
+            # Check if player has media loaded
+            if not self.player.get_media():
                 return
-            new = max(0, cur + ms)
+            cur = self.player.get_time()
+            if cur is None or cur < 0:
+                cur = 0
             length = self.player.get_length()
+            if length is None or length < 0:
+                length = 0
+            new = max(0, cur + ms)
             if length > 0:
                 new = min(new, length - 100)
             self.player.set_time(int(new))
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"Seek error: {e}")
 
     def change_volume(self, delta):
         try:
             vol = self.player.audio_get_volume()
-            if vol < 0:
-                vol = 100
-            new = max(0, min(100, vol + delta))
-            self.player.audio_set_volume(int(new))
-        except Exception:
-            pass
-
-    def update_status(self):
-        # push position, length, volume to QML
-        try:
-            root = self.quick_widget.rootObject()
-            if not root:
-                return
-            pos = self.player.get_time()
-            length = self.player.get_length()
-            vol = self.player.audio_get_volume()
-            if pos is None:
-                pos = 0
-            if length is None:
-                length = 0
             if vol is None or vol < 0:
-                vol = 0
-            # call QML function updateStatus(posMs, lengthMs, volPercent)
+                vol = 100
+            new = max(0, min(100, int(vol + delta)))
+            self.player.audio_set_volume(new)
+            # Update UI immediately
             try:
-                root.updateStatus(pos, length, vol)
+                if hasattr(self, 'vol_slider'):
+                    self.vol_slider.setValue(new)
+                if hasattr(self, 'vol_label'):
+                    self.vol_label.setText(f'Vol: {new}')
             except Exception:
                 pass
-        except Exception:
-            pass
-        # update bottom control bar (only when not user-dragging)
+        except Exception as e:
+            print(f"Volume change error: {e}")
+
+    def update_status(self):
         try:
-            if hasattr(self, 'pos_slider') and not getattr(self, '_user_dragging', False):
-                if length > 0:
-                    try:
-                        val = int((pos/length) * 1000)
-                    except Exception:
+            # Always get volume first (works even without media)
+            vol = self.player.audio_get_volume()
+            if vol is None or vol < 0:
+                vol = 0
+            
+            # Check if player is actually playing
+            is_playing = self.player.is_playing()
+            
+            # Get player state (0=NothingSpecial, 1=Opening, 2=Buffering, 3=Playing, 4=Paused, 5=Stopped, 6=Ended, 7=Error)
+            try:
+                state = self.player.get_state()
+            except Exception:
+                state = None
+            
+            # Try to get time information from VLC
+            # VLC get_time() and get_length() return milliseconds
+            pos_raw = self.player.get_time()
+            length_raw = self.player.get_length()
+            
+            # If length is not available from player, try to get it from media object
+            if (length_raw is None or length_raw < 0):
+                try:
+                    media = self.player.get_media()
+                    if media:
+                        # Try to get duration from media object
+                        media_length = media.get_duration()
+                        if media_length and media_length > 0:
+                            length_raw = media_length
+                except Exception:
+                    pass
+
+            # Handle None and negative values properly
+            # VLC returns -1 when time/length is not available
+            # Only use position if it's valid (>= 0) or if we're playing/paused
+            if pos_raw is not None and pos_raw >= 0:
+                pos = pos_raw
+            else:
+                pos = 0
+            
+            if length_raw is not None and length_raw >= 0:
+                length = length_raw
+            else:
+                length = 0
+            
+            # Debug output (can be removed later)
+            if not hasattr(self, '_last_debug_time'):
+                self._last_debug_time = 0
+            import time
+            current_time = time.time()
+            if current_time - self._last_debug_time > 2.0:  # Print every 2 seconds
+                print(f"Status: state={state}, is_playing={is_playing}, pos={pos}ms, length={length}ms, pos_raw={pos_raw}, length_raw={length_raw}")
+                self._last_debug_time = current_time
+
+            # push position, length, volume to QML
+            try:
+                root = self.qml_widget.rootObject()
+                if root:
+                    root.updateStatus(pos, length, vol)
+            except Exception as e:
+                print(f"Error updating QML status: {e}")
+            
+            # update bottom control bar (only when not user-dragging)
+            try:
+                if hasattr(self, 'pos_slider') and not getattr(self, '_user_dragging', False):
+                    if length > 0:
+                        if pos >= 0:
+                            val = int((pos/length) * 1000)
+                            val = max(0, min(1000, val))  # Clamp to valid range
+                        else:
+                            val = 0
+                    else:
                         val = 0
-                else:
-                    val = 0
-                # avoid repeatedly setting same value which can be noisy
-                try:
-                    if self.pos_slider.value() != val:
+                    # Always update slider value to reflect current position
+                    old_slider_val = self.pos_slider.value()
+                    if old_slider_val != val:
+                        self.pos_slider.blockSignals(True)  # Prevent triggering events during update
                         self.pos_slider.setValue(val)
-                except Exception:
-                    pass
-                # update time and volume displays
-                try:
-                    self.time_label.setText(self._fmt_ms(pos) + ' / ' + self._fmt_ms(length))
-                except Exception:
-                    pass
-                try:
-                    if self.vol_slider.value() != int(vol):
-                        self.vol_slider.setValue(int(vol))
+                        self.pos_slider.blockSignals(False)
+                        # Force slider update
+                        self.pos_slider.update()
+                        self.pos_slider.repaint()
+                        # Debug output (only print significant changes, every 5 seconds)
+                        if not hasattr(self, '_last_slider_val') or abs(self._last_slider_val - val) > 10:
+                            if not hasattr(self, '_last_slider_debug_time'):
+                                self._last_slider_debug_time = 0
+                            import time
+                            current_time = time.time()
+                            if current_time - self._last_slider_debug_time > 5.0:  # Print every 5 seconds
+                                print(f"Slider updated: {old_slider_val} -> {val}/1000 (pos={pos}ms, length={length}ms)")
+                                self._last_slider_debug_time = current_time
+                            self._last_slider_val = val
+                    
+                    # Always update time label - show actual values even if pos is 0
+                    # Format: current_time / total_time
+                    if length > 0:
+                        time_text = self._fmt_ms(pos) + ' / ' + self._fmt_ms(length)
+                    else:
+                        time_text = self._fmt_ms(pos) + ' / --:--'
+                    # Force update the time label
+                    if hasattr(self, 'time_label'):
+                        old_text = self.time_label.text()
+                        if old_text != time_text:
+                            self.time_label.setText(time_text)
+                            # Force repaint to ensure label is updated
+                            self.time_label.update()
+                            self.time_label.repaint()
+                            # Ensure label is visible
+                            self.time_label.setVisible(True)
+                            self.time_label.show()  # Explicitly show the widget
+                            # Debug output (only print when text actually changes, once per update)
+                            if not hasattr(self, '_last_time_text') or self._last_time_text != time_text:
+                                # Only print once when text changes
+                                print(f"Time label updated: '{old_text}' -> '{time_text}'")
+                                self._last_time_text = time_text
+                        # Always ensure label is visible, even if text didn't change
+                        if not self.time_label.isVisible():
+                            print(f"Time label was hidden! Making it visible...")
+                            self.time_label.setVisible(True)
+                            self.time_label.show()
+                        # Also ensure control_bar is visible and restart hide timer
+                        if hasattr(self, 'control_bar'):
+                            if not self.control_bar.isVisible():
+                                print(f"Control bar was hidden! Making it visible...")
+                                self.control_bar.setVisible(True)
+                                self.control_bar.show()
+                            # Restart the hide timer so control bar stays visible during playback
+                            if hasattr(self, 'hide_timer'):
+                                self.hide_timer.stop()
+                                # Only auto-hide if not playing (to keep controls visible during playback)
+                                if not self.player.is_playing():
+                                    self.hide_timer.start()
+                
+                # Always update volume UI
+                if hasattr(self, 'vol_slider'):
+                    vol_int = int(vol)
+                    self.vol_slider.setValue(vol_int)
+                if hasattr(self, 'vol_label'):
                     self.vol_label.setText(f'Vol: {int(vol)}')
-                except Exception:
-                    pass
-        except Exception:
-            pass
+            except Exception as e:
+                print(f"Error updating control bar: {e}")
+        except Exception as e:
+            print(f"Error in update_status: {e}")
 
     def dragEnterEvent(self, event: QtGui.QDragEnterEvent):
         if event.mimeData().hasUrls():
